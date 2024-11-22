@@ -15,9 +15,11 @@ bool debug = false;
 int
 main (int argc, char **argv)
 {
+  get_args (argc, argv);
   if (debug)
     fprintf (stderr, "Shutting down\n");
 
+  
   return EXIT_SUCCESS;
 }
 
