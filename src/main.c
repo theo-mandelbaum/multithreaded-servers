@@ -19,7 +19,11 @@ main (int argc, char **argv)
   get_args (argc, argv);
   if (debug)
     fprintf (stderr, "Shutting down\n");
-  
+
+  if (call_server)
+    {
+      echo_server ();
+    }
   return EXIT_SUCCESS;
 }
 
@@ -27,7 +31,7 @@ static bool
 get_args (int argc, char **argv)
 {
   int ch = 0;
-  while ((ch = getopt (argc, argv, "dh")) != -1)
+  while ((ch = getopt (argc, argv, "dhs:")) != -1)
     {
       switch (ch)
         {
