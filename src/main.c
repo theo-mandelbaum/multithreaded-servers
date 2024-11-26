@@ -11,6 +11,7 @@
 static bool get_args (int, char **);
 
 bool debug = false;
+bool call_server = false;
 
 int
 main (int argc, char **argv)
@@ -18,7 +19,6 @@ main (int argc, char **argv)
   get_args (argc, argv);
   if (debug)
     fprintf (stderr, "Shutting down\n");
-
   
   return EXIT_SUCCESS;
 }
@@ -33,6 +33,9 @@ get_args (int argc, char **argv)
         {
         case 'd':
           debug = true;
+          break;
+        case 's':
+          call_server = true;
           break;
         default:
           return false;
