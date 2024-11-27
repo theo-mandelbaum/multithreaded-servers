@@ -4,6 +4,6 @@
 #include <stdio.h>
 
 // Print the DHCP message to the specified output file stream
-void dump_msg (FILE *, msg_t *, size_t);
+void dump_msg (FILE *, uint8_t *, size_t);
 
 #endif
