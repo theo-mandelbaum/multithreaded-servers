@@ -16,11 +16,12 @@
 
 #define MAX_IPS 5
 
-msg_t *server_reply_gen(uint8_t *, uint8_t, uint32_t, options_t);
+msg_t *server_reply_gen(uint8_t *, uint8_t, uint32_t, options_t, int);
 int address_len_helper(int);
 struct sockaddr_in address_gen();
 void print_options_fields(options_t options);
 void reply_type_helper (options_t, uint8_t *, size_t);
+int socket_helper (int, struct sockaddr_in, int);
 
 void echo_server()
 {
@@ -45,6 +46,19 @@ void echo_server()
     exit(EXIT_FAILURE);
   }
 
+
+  int count = 1;
+  while (count < MAX_IPS)
+    {
+      if (socket_helper (socketfd, addr, count) == 0)
+        break;
+      count++;
+    }
+
+
+  // socket_helper (socketfd, addr);
+
+/*
   // Set up the length of the request that the server receives
   size_t length = sizeof(msg_t) + sizeof(options_t);
   // size_t length = 1024;
@@ -53,16 +67,8 @@ void echo_server()
 
   ssize_t nbytes = recvfrom(socketfd, recv_buffer, length, 0, (struct sockaddr *)&addr, &addrlen);
 
-  // printf ("%ld\n", nbytes);
-
- // dump_packet (recv_buffer, length);
-
-  // dump_msg (stdout, recv_buffer, nbytes);
-
   // Create our BOOTP data from the received request
   msg_t *recv_msg = (msg_t *)recv_buffer;
-
-  // dump_msg (stdout, recv_buffer, length);
 
   options_t options;
   options.request = calloc(1, sizeof(struct in_addr));
@@ -77,17 +83,11 @@ void echo_server()
   options.sid = calloc(1, sizeof(struct in_addr));
   options.sid = NULL;
 
-  print_options_fields(options);
-
   // memset (&options, 0, sizeof (options));
   get_options(recv_buffer + sizeof (msg_t) + sizeof (MAGIC_COOKIE), recv_buffer + nbytes - 1, &options);
 
-  print_options_fields(options);
-
   // Construct the BOOTP response
   msg_t *msg_response = server_reply_gen(recv_msg->chaddr, recv_msg->htype, recv_msg->xid, options);
-
-  // dump_msg (stdout, msg_response, sizeof (msg_t));
 
   size_t send_size = sizeof(msg_t);
   uint8_t *send_buffer = calloc(send_size, sizeof(uint8_t));
@@ -96,21 +96,17 @@ void echo_server()
   // Add all of the dhcp data to the response buffer
   send_buffer = append_cookie(send_buffer, &send_size);
 
-  dump_packet (send_buffer, send_size);
-
   // If the request id was set, then append it to the response
-  /*if (options.request != NULL)
-  {
-    send_buffer = append_option(send_buffer, &send_size, DHCP_opt_reqip, sizeof(struct in_addr), (uint8_t *)options.request);
-  }
-*/
+  // if (options.request != NULL)
+  // {
+  //  send_buffer = append_option(send_buffer, &send_size, DHCP_opt_reqip, sizeof(struct in_addr), (uint8_t *)options.request);
+  // }
+
   uint8_t type_val;
-  // uint32_t lease_val = 0x00278D00;
   uint32_t lease_val = 0x008D2700;
   if (*options.type == (uint8_t)DHCPDISCOVER)
     {
       type_val = DHCPOFFER;
-      printf ("entering first if");
       send_buffer = append_option (send_buffer, &send_size, DHCP_opt_msgtype, sizeof (uint8_t), &type_val);
       send_buffer = append_option (send_buffer, &send_size, DHCP_opt_lease, sizeof(uint32_t), (uint8_t *)&lease_val);
     }
@@ -120,7 +116,6 @@ void echo_server()
       if (options.sid->s_addr == inet_addr ("192.168.1.0"))
         {
           type_val = DHCPACK;
-          printf ("entering second if");
           send_buffer = append_option (send_buffer, &send_size, DHCP_opt_msgtype, sizeof (uint8_t), &type_val);
 
           send_buffer = append_option (send_buffer, &send_size, DHCP_opt_lease, sizeof(uint32_t), (uint8_t *)&lease_val);
@@ -136,22 +131,6 @@ void echo_server()
   sid_val.s_addr = inet_addr ("192.168.1.0");
   send_buffer = append_option (send_buffer, &send_size, DHCP_opt_sid, sizeof (struct in_addr), (uint8_t *)&sid_val);
 
-/*
-  // If the message type was set, then append it to the response
-  reply_type_helper (options, send_buffer, send_size);
-
-  // If the server id was set, then append it to the response
-  if (options.sid != NULL)
-    {
-      send_buffer = append_option (send_buffer, &send_size, DHCP_opt_sid, sizeof(struct in_addr), (uint8_t *)options.sid);
-    }
-  else
-    {
-      struct in_addr *basic_sid = calloc (1, sizeof (struct in_addr));
-      basic_sid->s_addr = inet_addr ("192.168.1.0");
-      send_buffer = append_option (send_buffer, &send_size, DHCP_opt_sid, sizeof(struct in_addr), (uint8_t *)basic_sid);
-    }
-*/
   send_buffer = append_option (send_buffer, &send_size, DHCP_opt_end, 0, NULL);
 
   // Sending my response back to the client
@@ -161,12 +140,104 @@ void echo_server()
   free(recv_buffer);
   free(send_buffer);
   close(socketfd);
+  */
 }
+
+int
+socket_helper (int socketfd, struct sockaddr_in addr, int count)
+  {
+    for (int i = 0; i < 2; i++)
+      {
+        // Set up the length of the request that the server receives
+        size_t length = sizeof(msg_t) + sizeof(options_t);
+        // size_t length = 1024;
+        uint8_t *recv_buffer = calloc(length, sizeof(uint8_t));
+        socklen_t addrlen = sizeof(addr);
+
+        ssize_t nbytes = recvfrom(socketfd, recv_buffer, length, 0, (struct sockaddr *)&addr, &addrlen);
+
+        if (nbytes < 0)
+          return 0;
+        // Create our BOOTP data from the received request
+        msg_t *recv_msg = (msg_t *)recv_buffer;
+
+        options_t options;
+        options.request = calloc(1, sizeof(struct in_addr));
+        options.request = NULL;
+
+        options.lease = calloc(1, sizeof(uint32_t));
+        options.lease = NULL;
+
+        options.type = calloc(1, sizeof(uint8_t));
+        options.type = NULL;
+
+        options.sid = calloc(1, sizeof(struct in_addr));
+        options.sid = NULL;
+
+        // memset (&options, 0, sizeof (options));
+        get_options(recv_buffer + sizeof (msg_t) + sizeof (MAGIC_COOKIE), recv_buffer + nbytes - 1, &options);
+
+        // Construct the BOOTP response
+        msg_t *msg_response = server_reply_gen(recv_msg->chaddr, recv_msg->htype, recv_msg->xid, options, count);
+
+        size_t send_size = sizeof(msg_t);
+        uint8_t *send_buffer = calloc(send_size, sizeof(uint8_t));
+        memcpy(send_buffer, msg_response, sizeof(msg_t));
+
+        // Add all of the dhcp data to the response buffer
+        send_buffer = append_cookie(send_buffer, &send_size);
+
+        // If the request id was set, then append it to the response
+        // if (options.request != NULL)
+        // {
+        //  send_buffer = append_option(send_buffer, &send_size, DHCP_opt_reqip, sizeof(struct in_addr), (uint8_t *)options.request);
+        // }
+      
+        uint8_t type_val;
+        uint32_t lease_val = 0x008D2700;
+        if (*options.type == (uint8_t)DHCPDISCOVER)
+          {
+            type_val = DHCPOFFER;
+            send_buffer = append_option (send_buffer, &send_size, DHCP_opt_msgtype, sizeof (uint8_t), &type_val);
+            send_buffer = append_option (send_buffer, &send_size, DHCP_opt_lease, sizeof(uint32_t), (uint8_t *)&lease_val);
+          }
+
+        if (*options.type == (uint8_t)DHCPREQUEST)
+          {
+            if (options.sid->s_addr == inet_addr ("192.168.1.0"))
+              {
+                type_val = DHCPACK;
+                send_buffer = append_option (send_buffer, &send_size, DHCP_opt_msgtype, sizeof (uint8_t), &type_val);
+
+                send_buffer = append_option (send_buffer, &send_size, DHCP_opt_lease, sizeof(uint32_t), (uint8_t *)&lease_val);
+              }
+            else
+              {
+                type_val = DHCPNAK;
+                send_buffer = append_option (send_buffer, &send_size, DHCP_opt_msgtype, sizeof (uint8_t), &type_val);
+              }
+          }
+
+        struct in_addr sid_val;
+        sid_val.s_addr = inet_addr ("192.168.1.0");
+        send_buffer = append_option (send_buffer, &send_size, DHCP_opt_sid, sizeof (struct in_addr), (uint8_t *)&sid_val);
+
+        send_buffer = append_option (send_buffer, &send_size, DHCP_opt_end, 0, NULL);
+
+        // Sending my response back to the client
+        sendto(socketfd, send_buffer, send_size, 0, (struct sockaddr *)&addr, addrlen);
+
+        free(msg_response);
+        free(recv_buffer);
+        free(send_buffer);
+        close(socketfd);
+        return 1;
+      }
+  }
 
 void
 reply_type_helper (options_t options, uint8_t *send_buffer, size_t send_size)
   {
-    printf ("Inside reply type helper");
     if (*options.type == DHCPDISCOVER)
       send_buffer = append_option (send_buffer, &send_size, DHCP_opt_msgtype, 1, (uint8_t *)DHCPOFFER);
     
@@ -175,7 +246,7 @@ reply_type_helper (options_t options, uint8_t *send_buffer, size_t send_size)
   }
 
 msg_t *
-server_reply_gen(uint8_t *recv_chaddr, uint8_t recv_htype, uint32_t recv_xid, options_t options)
+server_reply_gen(uint8_t *recv_chaddr, uint8_t recv_htype, uint32_t recv_xid, options_t options, int count)
 {
   msg_t *newMsg = calloc(sizeof(msg_t), sizeof(uint8_t));
   memset(newMsg, 0, sizeof(msg_t));
@@ -191,6 +262,8 @@ server_reply_gen(uint8_t *recv_chaddr, uint8_t recv_htype, uint32_t recv_xid, op
     }
   else
     {
+      char buffer[12];
+      snprintf (buffer, 12, "192.168.1.%d", count);
       inet_pton(AF_INET, "192.168.1.1", &newMsg->yiaddr);
     }
   memcpy(newMsg->chaddr, recv_chaddr, 16); // Hardware address
