@@ -51,118 +51,185 @@ void echo_server()
 
 int socket_helper(int socketfd, struct sockaddr_in addr)
 {
+  // Create count to keep track of the amount of IPS that have been logged
   int count = 1;
+  ip_record_t ip_records[4];
+  for (int i = 0; i < 4; i++)
+    {
+      memset(ip_records[i].chaddr, 0, sizeof(ip_records[i].chaddr));
+      ip_records[i].yiaddr_count = 0;
+      ip_records[i].dhcp_type = 0;
+      ip_records[i].is_tombstone = 0;
+    }
+
   while (1)
   {
-    for (int i = 0; i < 2; i++)
+    // Set up the length of the request that the server receives
+    size_t length = sizeof(msg_t) + sizeof(options_t);
+    uint8_t *recv_buffer = calloc(1, length);
+    socklen_t addrlen = sizeof(addr);
+    ssize_t nbytes = recvfrom(socketfd, recv_buffer, length, 0, (struct sockaddr *)&addr, &addrlen);
+
+    if (nbytes < 0)
     {
-      // Set up the length of the request that the server receives
-      size_t length = sizeof(msg_t) + sizeof(options_t);
-      uint8_t *recv_buffer = calloc(1, length);
-      socklen_t addrlen = sizeof(addr);
-      ssize_t nbytes = recvfrom(socketfd, recv_buffer, length, 0, (struct sockaddr *)&addr, &addrlen);
+      free(recv_buffer);
+      return 0;
+    }
+    // Create our BOOTP data from the received request
+    msg_t *recv_msg = (msg_t *)recv_buffer;
 
-      if (nbytes < 0)
-      {
-        free(recv_buffer);
-        return 0;
-      }
-      // Create our BOOTP data from the received request
-      msg_t *recv_msg = (msg_t *)recv_buffer;
+    if (count >= MAX_IPS && memcmp(ip_records[3].chaddr, recv_msg->chaddr, sizeof(ip_records[3].chaddr)) != 0)
+    {
+      // Reject request
+      printf ("Rejecting request\n");
 
-      if (count >= MAX_IPS)
-      {
-        // Reject request
+      // Construct the BOOTP response
+      bad_server_reply_gen(recv_msg, count);
 
-        // Construct the BOOTP response
-        bad_server_reply_gen(recv_msg, count);
+      size_t send_size = sizeof(msg_t);
+      uint8_t *send_buffer = calloc(send_size, sizeof(uint8_t));
+      memcpy(send_buffer, recv_msg, sizeof(msg_t));
 
-        size_t send_size = sizeof(msg_t);
-        uint8_t *send_buffer = calloc(send_size, sizeof(uint8_t));
-        memcpy(send_buffer, recv_msg, sizeof(msg_t));
+      // Add all of the dhcp data to the response buffer
+      send_buffer = append_cookie(send_buffer, &send_size);
 
-        // Add all of the dhcp data to the response buffer
-        send_buffer = append_cookie(send_buffer, &send_size);
+      // Append the options for a 5th, invalid, client
+      uint8_t type_val = DHCPNAK;
+      send_buffer = append_option(send_buffer, &send_size, DHCP_opt_msgtype, sizeof(uint8_t), &type_val);
 
-        // Append the options for a 5th, invalid, client
-        uint8_t type_val = DHCPNAK;
-        send_buffer = append_option(send_buffer, &send_size, DHCP_opt_msgtype, sizeof(uint8_t), &type_val);
+      struct in_addr sid_val;
+      sid_val.s_addr = inet_addr("192.168.1.0");
+      send_buffer = append_option(send_buffer, &send_size, DHCP_opt_sid, sizeof(struct in_addr), (uint8_t *)&sid_val);
+      send_buffer = append_option(send_buffer, &send_size, DHCP_opt_end, 0, NULL);
 
-        struct in_addr sid_val;
-        sid_val.s_addr = inet_addr("192.168.1.0");
-        send_buffer = append_option(send_buffer, &send_size, DHCP_opt_sid, sizeof(struct in_addr), (uint8_t *)&sid_val);
-        send_buffer = append_option(send_buffer, &send_size, DHCP_opt_end, 0, NULL);
+      // Sending my response back to the client
+      sendto(socketfd, send_buffer, send_size, 0, (struct sockaddr *)&addr, addrlen);
+      free(send_buffer);
+    }
+    else
+    {
+      // Accept and handle request
 
-        // Sending my response back to the client
-        sendto(socketfd, send_buffer, send_size, 0, (struct sockaddr *)&addr, addrlen);
-        free(send_buffer);
-      }
-      else
-      {
-        // Accept and handle request
+      // Create an options struct, zero it out
+      options_t options;
+      options.request = calloc(1, sizeof(struct in_addr));
+      options.lease = calloc(1, sizeof(uint32_t));
+      options.type = calloc(1, sizeof(uint8_t));
+      options.sid = calloc(1, sizeof(struct in_addr));
 
-        // Create an options struct, zero it out
-        options_t options;
-        options.request = calloc(1, sizeof(struct in_addr));
-        options.lease = calloc(1, sizeof(uint32_t));
-        options.type = calloc(1, sizeof(uint8_t));
-        options.sid = calloc(1, sizeof(struct in_addr));
+      // Get the options based on the received buffer
+      get_options (recv_buffer + sizeof(msg_t) + sizeof(MAGIC_COOKIE), recv_buffer + nbytes - 1, &options);
 
-        // Get the options based on the received buffer
-        get_options(recv_buffer + sizeof(msg_t) + sizeof(MAGIC_COOKIE), recv_buffer + nbytes - 1, &options);
-
-        // Construct the BOOTP response
-        server_reply_gen(recv_msg, options, count);
-
-        size_t send_size = sizeof(msg_t);
-        uint8_t *send_buffer = calloc(send_size, sizeof(uint8_t));
-        memcpy(send_buffer, recv_msg, sizeof(msg_t));
-
-        // Add all of the dhcp data to the response buffer
-        send_buffer = append_cookie(send_buffer, &send_size);
-
-        uint8_t type_val;
-        uint32_t lease_val = 0x008D2700;
-        // If the message type is DHCPDISCOVER, then I send back an offer with a 30 day lease time
-        if (*options.type == (uint8_t)DHCPDISCOVER)
+      int yiaddr_count = 0; // Initialize yiaddr_count
+      for (int i = 0; i < 4; i++)
         {
-          type_val = DHCPOFFER;
+          uint8_t zero_array[sizeof(ip_records[i].chaddr)] = {0};
+          if (memcmp (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr)) == 0) {
+              // Client already exists
+              yiaddr_count = ip_records[i].yiaddr_count;
+              break;
+          }
+          if (memcmp (ip_records[i].chaddr, zero_array, sizeof(ip_records[i].chaddr)) == 0) {
+              // New client, assign an IP
+              memcpy (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr));
+              ip_records[i].is_tombstone = 0;
+              ip_records[i].yiaddr_count = count;
+              yiaddr_count = count; // Assign the count as the current yiaddr_count
+              count++; // Increment the count for new client
+              break;
+          }
+
+          if (ip_records[i].is_tombstone == 1)
+            {
+              memcpy (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr));
+              ip_records[i].dhcp_type = DHCPDISCOVER;
+              ip_records[i].is_tombstone = 0;
+            }
+        }
+
+      // Construct the BOOTP response
+      server_reply_gen(recv_msg, options, yiaddr_count);
+
+      size_t send_size = sizeof(msg_t);
+      uint8_t *send_buffer = calloc(send_size, sizeof(uint8_t));
+      memcpy(send_buffer, recv_msg, sizeof(msg_t));
+
+      // Add all of the dhcp data to the response buffer
+      send_buffer = append_cookie(send_buffer, &send_size);
+
+      uint8_t type_val;
+      uint32_t lease_val = 0x008D2700;
+      // If the message type is DHCPDISCOVER, then I send back an offer with a 30 day lease time
+      if (*options.type == (uint8_t)DHCPDISCOVER)
+      {
+        type_val = DHCPOFFER;
+        send_buffer = append_option(send_buffer, &send_size, DHCP_opt_msgtype, sizeof(uint8_t), &type_val);
+        send_buffer = append_option(send_buffer, &send_size, DHCP_opt_lease, sizeof(uint32_t), (uint8_t *)&lease_val);
+      }
+
+      if (*options.type == (uint8_t)DHCPREQUEST)
+      {
+        // If message type is a DHCPREQUEST, then I check if the server id is correct
+        if (options.sid->s_addr == inet_addr("192.168.1.0"))
+        {
+          // If the server id is correct, then I send a DHCPACK with a 30 day lease time
+          type_val = DHCPACK;
           send_buffer = append_option(send_buffer, &send_size, DHCP_opt_msgtype, sizeof(uint8_t), &type_val);
           send_buffer = append_option(send_buffer, &send_size, DHCP_opt_lease, sizeof(uint32_t), (uint8_t *)&lease_val);
         }
-
-        if (*options.type == (uint8_t)DHCPREQUEST)
+        else
         {
-          // If message type is a DHCPREQUEST, then I check if the server id is correct
-          if (options.sid->s_addr == inet_addr("192.168.1.0"))
-          {
-            // If the server id is correct, then I send a DHCPACK with a 30 day lease time
-            type_val = DHCPACK;
-            send_buffer = append_option(send_buffer, &send_size, DHCP_opt_msgtype, sizeof(uint8_t), &type_val);
-            send_buffer = append_option(send_buffer, &send_size, DHCP_opt_lease, sizeof(uint32_t), (uint8_t *)&lease_val);
-          }
-          else
-          {
-            // If the server id is incorrect, I send a DHCPNAK
-            type_val = DHCPNAK;
-            send_buffer = append_option(send_buffer, &send_size, DHCP_opt_msgtype, sizeof(uint8_t), &type_val);
-          }
+          // If the server id is incorrect, I send a DHCPNAK
+          type_val = DHCPNAK;
+          send_buffer = append_option(send_buffer, &send_size, DHCP_opt_msgtype, sizeof(uint8_t), &type_val);
         }
-        free_options(&options);
-
-        // Send back a server id of 192.168.1.0
-        struct in_addr sid_val;
-        sid_val.s_addr = inet_addr("192.168.1.0");
-        send_buffer = append_option(send_buffer, &send_size, DHCP_opt_sid, sizeof(struct in_addr), (uint8_t *)&sid_val);
-        send_buffer = append_option(send_buffer, &send_size, DHCP_opt_end, 0, NULL);
-
-        // Sending my response back to the client
-        sendto(socketfd, send_buffer, send_size, 0, (struct sockaddr *)&addr, addrlen);
-        free(send_buffer);
       }
-      free(recv_buffer);
+
+      // If the message type if DHCPRELEASE, we must clear up space in the array for another request
+      if (*options.type == (uint8_t)DHCPRELEASE)
+        {
+          printf ("entering DHCPRELEASE case\n");
+          for (int i = 0; i < 4; i++)
+            {
+              if (memcmp (ip_records[i].chaddr, recv_msg->chaddr, sizeof (ip_records[i].chaddr)) == 0)
+                {
+                  printf ("Clearing space\n");
+                  ip_records[i].is_tombstone = 1;
+                  count--;
+                }
+            }
+          type_val = DHCPRELEASE;
+          send_buffer = append_option(send_buffer, &send_size, DHCP_opt_msgtype, sizeof(uint8_t), &type_val);
+          send_buffer = append_option(send_buffer, &send_size, DHCP_opt_lease, sizeof(uint32_t), (uint8_t *)&lease_val);
+        }
+      
+      printf ("%d\n", recv_msg->ciaddr.s_addr);
+
+      // Track where each request is in its DHCPDISCOVER-->DHCPREQUEST cycle
+      for (int i = 0; i < 4; i++)
+        {
+          if (ip_records[i].dhcp_type == 0)
+            {
+              ip_records[i].dhcp_type = DHCPDISCOVER;
+            }
+          else if (ip_records[i].dhcp_type == DHCPDISCOVER)
+            {
+              ip_records[i].dhcp_type = DHCPREQUEST;
+            }
+        }
+
+      // Send back a server id of 192.168.1.0
+      struct in_addr sid_val;
+      sid_val.s_addr = inet_addr("192.168.1.0");
+      send_buffer = append_option(send_buffer, &send_size, DHCP_opt_sid, sizeof(struct in_addr), (uint8_t *)&sid_val);
+      send_buffer = append_option(send_buffer, &send_size, DHCP_opt_end, 0, NULL);
+
+      // Sending my response back to the client
+      sendto(socketfd, send_buffer, send_size, 0, (struct sockaddr *)&addr, addrlen);
+      free(send_buffer);
+      free_options(&options);
     }
-    count++;
+    free(recv_buffer);
   }
   close(socketfd);
   return 1;
@@ -191,6 +258,7 @@ void server_reply_gen(msg_t *recv_msg, options_t options, int count)
     snprintf(buffer, 12, "192.168.1.%d", count);
     inet_pton(AF_INET, buffer, &recv_msg->yiaddr);
   }
+  inet_pton(AF_INET, "0.0.0.0", &recv_msg->ciaddr);
 }
 
 struct sockaddr_in
@@ -261,3 +329,13 @@ void print_options_fields(options_t options)
     printf("server id = %s\n", sid_buffer);
   }
 }
+
+/*
+static action_t const ip_[][NUM_EVENTS] = {
+  { DHCPDISCOVER, DHCPREQUEST },
+  { DHCPDISCOVER, DHCPREQUEST },
+  { DHCPDISCOVER, DHCPREQUEST },
+  { DHCPDISCOVER, DHCPREQUEST },
+  { DHCPDISCOVER, DHCPREQUEST }
+};
+*/

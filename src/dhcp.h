@@ -115,4 +115,12 @@ uint8_t *append_cookie (uint8_t *packet, size_t *packet_size);
 uint8_t *append_option (uint8_t *packet, size_t *packet_size, uint8_t option,
 		uint8_t option_size, uint8_t *option_value);
 
+typedef struct {
+  uint8_t chaddr[16];
+  int yiaddr_count;
+  uint8_t dhcp_type;
+
+  int is_tombstone;
+} ip_record_t;
+
 #endif
