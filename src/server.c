@@ -82,8 +82,36 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
     if (count >= MAX_IPS && memcmp(ip_records[3].chaddr, recv_msg->chaddr, sizeof(ip_records[3].chaddr)) != 0)
     {
       // Reject request
-
+      printf ("rejecting request\n");
       // Construct the BOOTP response
+
+      options_t options;
+      options.request = calloc(1, sizeof(struct in_addr));
+      options.lease = calloc(1, sizeof(uint32_t));
+      options.type = calloc(1, sizeof(uint8_t));
+      options.sid = calloc(1, sizeof(struct in_addr));
+
+      // Get the options based on the received buffer
+      get_options (recv_buffer + sizeof(msg_t) + sizeof(MAGIC_COOKIE), recv_buffer + nbytes - 1, &options);
+
+      if (*options.type == (uint8_t)DHCPRELEASE)
+        {
+          printf ("entering release\n");
+          for (int i = 0; i < 4; i++)
+            {
+              if (memcmp (ip_records[i].chaddr, recv_msg->chaddr, sizeof (ip_records[i].chaddr)) == 0)
+                {
+                  printf ("entering tombstone\n");
+                  ip_records[i].is_tombstone = 1;
+                  // memset(ip_records[i].chaddr, 0, sizeof(ip_records[i].chaddr));
+                  count--;
+                }
+            }
+          // Free all allocated memory
+          free_options(&options);
+          continue;
+        }
+      
       bad_server_reply_gen(recv_msg, count);
 
       size_t send_size = sizeof(msg_t);
@@ -149,7 +177,6 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
       
       if (check_tombstones)
         {
-          printf ("entering tombstone\n");
           bool new_chaddr_tombstone = false;
           for (int i = 0; i < 4; i++)
             {
@@ -167,7 +194,7 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
             {
               for (int i = 0; i < 4; i++)
                 {
-                  if (memcmp (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr)) == 0 && ip_records[i].is_tombstone == 1)
+                  if (memcmp (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr)) != 0 && ip_records[i].is_tombstone == 1)
                     {
                       memcpy (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr));
                       ip_records[i].dhcp_type = DHCPDISCOVER;
@@ -216,14 +243,16 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
           send_buffer = append_option(send_buffer, &send_size, DHCP_opt_msgtype, sizeof(uint8_t), &type_val);
         }
       }
-
+      printf ("%d\n", count);
       // If the message type if DHCPRELEASE, we must clear up space in the array for another request
       if (*options.type == (uint8_t)DHCPRELEASE)
         {
+          printf ("entering release\n");
           for (int i = 0; i < 4; i++)
             {
               if (memcmp (ip_records[i].chaddr, recv_msg->chaddr, sizeof (ip_records[i].chaddr)) == 0)
                 {
+                  printf ("entering tombstone\n");
                   ip_records[i].is_tombstone = 1;
                   // memset(ip_records[i].chaddr, 0, sizeof(ip_records[i].chaddr));
                   count--;
@@ -270,6 +299,7 @@ void bad_server_reply_gen(msg_t *recv_msg, int count)
   // Change the op and the yiaddr of the msg_t that is passed in, for an invalid client
   recv_msg->op = 2;
   inet_pton(AF_INET, "0.0.0.0", &recv_msg->yiaddr);
+  inet_pton(AF_INET, "0.0.0.0", &recv_msg->ciaddr);
 }
 
 void server_reply_gen(msg_t *recv_msg, options_t options, int count)
