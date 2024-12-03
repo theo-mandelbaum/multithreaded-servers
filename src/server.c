@@ -130,9 +130,10 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
             {
               // Client already exists
               yiaddr_for_reply = ip_records[i].yiaddr_count;
+              check_tombstones = false;
               break;
             }
-          if (memcmp (ip_records[i].chaddr, zero_array, sizeof(ip_records[i].chaddr)) == 0)
+          if (memcmp (ip_records[i].chaddr, zero_array, sizeof(ip_records[i].chaddr)) == 0 && ip_records[i].is_tombstone == 0)
             {
               // New client, assign an IP
               memcpy (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr));
@@ -149,15 +150,31 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
       if (check_tombstones)
         {
           printf ("entering tombstone\n");
+          bool new_chaddr_tombstone = false;
           for (int i = 0; i < 4; i++)
             {
-              if (ip_records[i].is_tombstone == 1)
+              if (memcmp (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr)) == 0)
                 {
-                  memcpy (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr));
+
                   ip_records[i].dhcp_type = DHCPDISCOVER;
                   ip_records[i].is_tombstone = 0;
                   yiaddr_for_reply = ip_records[i].yiaddr_count;
+                  new_chaddr_tombstone = true;
                   break;
+                }
+            }
+          if (new_chaddr_tombstone)
+            {
+              for (int i = 0; i < 4; i++)
+                {
+                  if (memcmp (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr)) == 0 && ip_records[i].is_tombstone == 1)
+                    {
+                      memcpy (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr));
+                      ip_records[i].dhcp_type = DHCPDISCOVER;
+                      ip_records[i].is_tombstone = 0;
+                      yiaddr_for_reply = ip_records[i].yiaddr_count;
+                      break;
+                    }
                 }
             }
         }
@@ -208,13 +225,14 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
               if (memcmp (ip_records[i].chaddr, recv_msg->chaddr, sizeof (ip_records[i].chaddr)) == 0)
                 {
                   ip_records[i].is_tombstone = 1;
-                  memset(ip_records[i].chaddr, 0, sizeof(ip_records[i].chaddr));
+                  // memset(ip_records[i].chaddr, 0, sizeof(ip_records[i].chaddr));
                   count--;
                 }
             }
-          type_val = DHCPRELEASE;
-          send_buffer = append_option(send_buffer, &send_size, DHCP_opt_msgtype, sizeof(uint8_t), &type_val);
-          send_buffer = append_option(send_buffer, &send_size, DHCP_opt_lease, sizeof(uint32_t), (uint8_t *)&lease_val);
+          // Free all allocated memory
+          free(send_buffer);
+          free_options(&options);
+          continue;
         }
 
       // Track where each request is in its DHCPDISCOVER-->DHCPREQUEST cycle
