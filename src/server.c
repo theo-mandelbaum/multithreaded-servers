@@ -52,6 +52,7 @@ void echo_server()
 int socket_helper(int socketfd, struct sockaddr_in addr)
 {
   // Create count to keep track of the amount of IPS that have been logged
+  int yiaddr_count = 1; // Initialize yiaddr_count
   int count = 1;
   ip_record_t ip_records[4];
   for (int i = 0; i < 4; i++)
@@ -81,7 +82,6 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
     if (count >= MAX_IPS && memcmp(ip_records[3].chaddr, recv_msg->chaddr, sizeof(ip_records[3].chaddr)) != 0)
     {
       // Reject request
-      printf ("Rejecting request\n");
 
       // Construct the BOOTP response
       bad_server_reply_gen(recv_msg, count);
@@ -120,35 +120,50 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
       // Get the options based on the received buffer
       get_options (recv_buffer + sizeof(msg_t) + sizeof(MAGIC_COOKIE), recv_buffer + nbytes - 1, &options);
 
-      int yiaddr_count = 0; // Initialize yiaddr_count
+      bool check_tombstones = true;
+      // Keeps track of the yiaddr count just for the server's reply
+      int yiaddr_for_reply = 0;
       for (int i = 0; i < 4; i++)
         {
           uint8_t zero_array[sizeof(ip_records[i].chaddr)] = {0};
-          if (memcmp (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr)) == 0) {
+          if (memcmp (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr)) == 0)
+            {
               // Client already exists
-              yiaddr_count = ip_records[i].yiaddr_count;
+              yiaddr_for_reply = ip_records[i].yiaddr_count;
               break;
-          }
-          if (memcmp (ip_records[i].chaddr, zero_array, sizeof(ip_records[i].chaddr)) == 0) {
+            }
+          if (memcmp (ip_records[i].chaddr, zero_array, sizeof(ip_records[i].chaddr)) == 0)
+            {
               // New client, assign an IP
               memcpy (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr));
               ip_records[i].is_tombstone = 0;
-              ip_records[i].yiaddr_count = count;
-              yiaddr_count = count; // Assign the count as the current yiaddr_count
+              ip_records[i].yiaddr_count = yiaddr_count;
+              yiaddr_count++; // Assign the count as the current yiaddr_count
+              yiaddr_for_reply = ip_records[i].yiaddr_count;
               count++; // Increment the count for new client
+              check_tombstones = false;
               break;
-          }
-
-          if (ip_records[i].is_tombstone == 1)
+            }
+        }
+      
+      if (check_tombstones)
+        {
+          printf ("entering tombstone\n");
+          for (int i = 0; i < 4; i++)
             {
-              memcpy (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr));
-              ip_records[i].dhcp_type = DHCPDISCOVER;
-              ip_records[i].is_tombstone = 0;
+              if (ip_records[i].is_tombstone == 1)
+                {
+                  memcpy (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr));
+                  ip_records[i].dhcp_type = DHCPDISCOVER;
+                  ip_records[i].is_tombstone = 0;
+                  yiaddr_for_reply = ip_records[i].yiaddr_count;
+                  break;
+                }
             }
         }
 
       // Construct the BOOTP response
-      server_reply_gen(recv_msg, options, yiaddr_count);
+      server_reply_gen(recv_msg, options, yiaddr_for_reply);
 
       size_t send_size = sizeof(msg_t);
       uint8_t *send_buffer = calloc(send_size, sizeof(uint8_t));
@@ -188,13 +203,12 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
       // If the message type if DHCPRELEASE, we must clear up space in the array for another request
       if (*options.type == (uint8_t)DHCPRELEASE)
         {
-          printf ("entering DHCPRELEASE case\n");
           for (int i = 0; i < 4; i++)
             {
               if (memcmp (ip_records[i].chaddr, recv_msg->chaddr, sizeof (ip_records[i].chaddr)) == 0)
                 {
-                  printf ("Clearing space\n");
                   ip_records[i].is_tombstone = 1;
+                  memset(ip_records[i].chaddr, 0, sizeof(ip_records[i].chaddr));
                   count--;
                 }
             }
@@ -202,8 +216,6 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
           send_buffer = append_option(send_buffer, &send_size, DHCP_opt_msgtype, sizeof(uint8_t), &type_val);
           send_buffer = append_option(send_buffer, &send_size, DHCP_opt_lease, sizeof(uint32_t), (uint8_t *)&lease_val);
         }
-      
-      printf ("%d\n", recv_msg->ciaddr.s_addr);
 
       // Track where each request is in its DHCPDISCOVER-->DHCPREQUEST cycle
       for (int i = 0; i < 4; i++)
