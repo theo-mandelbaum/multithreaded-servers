@@ -177,7 +177,7 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
       
       if (check_tombstones)
         {
-          bool new_chaddr_tombstone = false;
+          bool new_chaddr_tombstone = true;
           for (int i = 0; i < 4; i++)
             {
               if (memcmp (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr)) == 0)
@@ -186,7 +186,7 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
                   ip_records[i].dhcp_type = DHCPDISCOVER;
                   ip_records[i].is_tombstone = 0;
                   yiaddr_for_reply = ip_records[i].yiaddr_count;
-                  new_chaddr_tombstone = true;
+                  new_chaddr_tombstone = false;
                   break;
                 }
             }
@@ -199,6 +199,7 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
                       memcpy (ip_records[i].chaddr, recv_msg->chaddr, sizeof(ip_records[i].chaddr));
                       ip_records[i].dhcp_type = DHCPDISCOVER;
                       ip_records[i].is_tombstone = 0;
+                      printf ("%d\n", ip_records[i].yiaddr_count);
                       yiaddr_for_reply = ip_records[i].yiaddr_count;
                       break;
                     }
@@ -243,16 +244,14 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
           send_buffer = append_option(send_buffer, &send_size, DHCP_opt_msgtype, sizeof(uint8_t), &type_val);
         }
       }
-      printf ("%d\n", count);
+
       // If the message type if DHCPRELEASE, we must clear up space in the array for another request
       if (*options.type == (uint8_t)DHCPRELEASE)
         {
-          printf ("entering release\n");
           for (int i = 0; i < 4; i++)
             {
               if (memcmp (ip_records[i].chaddr, recv_msg->chaddr, sizeof (ip_records[i].chaddr)) == 0)
                 {
-                  printf ("entering tombstone\n");
                   ip_records[i].is_tombstone = 1;
                   // memset(ip_records[i].chaddr, 0, sizeof(ip_records[i].chaddr));
                   count--;
