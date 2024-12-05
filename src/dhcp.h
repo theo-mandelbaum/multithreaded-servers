@@ -4,6 +4,7 @@
 #include <netdb.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <sys/socket.h>
 
 // For reference, see:
 // https://www.iana.org/assignments/bootp-dhcp-parameters/bootp-dhcp-parameters.xhtml
@@ -122,5 +123,13 @@ typedef struct {
 
   int is_tombstone;
 } ip_record_t;
+
+typedef struct {
+  int sfd;
+  uint8_t *recvbuffer;
+  ssize_t nbytes;
+  struct sockaddr_in addr;
+  socklen_t addrlen;
+} thread_args_t;
 
 #endif
