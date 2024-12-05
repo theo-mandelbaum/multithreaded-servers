@@ -376,3 +376,74 @@ int address_len_helper(int htype)
   return 0;
 }
 
+thread_args_t
+thread_args_init (int socket, uint8_t *buffer, ssize_t bytes, struct sockaddr_in addr, socklen_t addrlen)
+{
+  thread_args_t args;
+  args.sfd = socket;
+  args.recvbuffer = calloc (1, sizeof (buffer));
+  args.nbytes = bytes;
+  // memset (&args.addr, 0, sizeof (addr));
+  args.addr = addr;
+  args.addrlen = addrlen;
+
+  memcpy (args.recvbuffer, buffer, sizeof (buffer));
+  return args;
+}
+
+void *
+child (void *args)
+{
+  // Create our BOOTP data from the received request
+    // sem_t sem;
+    // sem_init (&sem, 0, 4);
+    // sem_wait (&sem);
+    // barrier that doesn't activate until 4 has been hit
+    thread_args_t *thread_stuff = (thread_args_t *) args;
+    msg_t *recv_msg = (msg_t *)thread_stuff->recvbuffer;
+
+    if (count >= MAX_IPS && memcmp(ip_records[3].chaddr, recv_msg->chaddr, sizeof(ip_records[3].chaddr)) != 0)
+    {
+      // Reject request
+      // Construct the BOOTP response
+      options_t options = create_options (thread_stuff->recvbuffer, thread_stuff->nbytes);
+
+      uint8_t *fake_send_buffer = calloc (1, sizeof (uint8_t));
+      if (handle_dhcp_release (ip_records, recv_msg, &count, fake_send_buffer, options) == 0)
+        
+        pthread_exit (NULL);
+
+      bad_server_reply_gen(recv_msg, count);
+
+      handle_nak_message (thread_stuff->sfd, recv_msg, thread_stuff->addr, thread_stuff->addrlen);
+    }
+    else
+    {
+      // Accept and handle request
+
+      // Create an options struct, zero it out
+      options_t options = create_options (thread_stuff->recvbuffer, thread_stuff->nbytes);
+
+      bool check_tombstones = true;
+      // Keeps track of the yiaddr count just for the server's reply
+      int yiaddr_for_reply = 0;
+      handle_client_assignment (ip_records, recv_msg, &yiaddr_count, &yiaddr_for_reply, &count, &check_tombstones);
+      
+      // Handle tombstone cases
+      if (check_tombstones)
+        {
+          handle_tombstone (ip_records, recv_msg, &yiaddr_for_reply);
+        }
+
+      // Construct the BOOTP response
+      server_reply_gen(recv_msg, options, yiaddr_for_reply);
+
+      if (handle_valid_message (thread_stuff->sfd, thread_stuff->addr, thread_stuff->addrlen, options, recv_msg, &count, ip_records) == 0)
+        pthread_exit (NULL);
+
+      free_options(&options);
+    }
+    free(thread_stuff->recvbuffer);
+    pthread_exit (NULL);
+}
+
