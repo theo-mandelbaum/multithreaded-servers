@@ -22,6 +22,7 @@ int address_len_helper(int);
 struct sockaddr_in address_gen();
 void print_options_fields(options_t);
 int socket_helper(int, struct sockaddr_in);
+int socket_helper_thread(int, struct sockaddr_in);
 void bad_server_reply_gen(msg_t *, int);
 void handle_client_assignment (ip_record_t *, msg_t *, int *, int *, int *, bool *);
 void handle_tombstone (ip_record_t *, msg_t *, int *);
@@ -29,15 +30,71 @@ options_t create_options (uint8_t *, ssize_t);
 void handle_nak_message (int, msg_t *, struct sockaddr_in, socklen_t);
 int handle_valid_message (int, struct sockaddr_in, socklen_t, options_t, msg_t *, int *, ip_record_t *);
 int handle_dhcp_release (ip_record_t *, msg_t *, int *, uint8_t *, options_t);
+thread_args_t thread_args_init (int, uint8_t *, ssize_t, struct sockaddr_in, socklen_t);
+void *child (void *);
 
 int yiaddr_count = 1;
 int count = 1;
 ip_record_t ip_records[4];
 
-void echo_server_thread()
+void echo_server_thread(int time)
+{
+  int socketfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+  // Create my address struct using a helper
+  struct sockaddr_in addr = address_gen();
+
+  // Set reusable socket options
+  int socket_option = 1;
+  setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&socket_option, sizeof(int));
+
+  // Set timeout socket options
+  struct timeval timeout = {time, 0};
+  setsockopt(socketfd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&timeout, sizeof(timeout));
+
+  // bind the socket to the client
+  if (bind(socketfd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
   {
-    
+    perror("Bind failed");
+    close(socketfd);
+    exit(EXIT_FAILURE);
   }
+
+  socket_helper_thread(socketfd, addr);
+}
+
+int socket_helper_thread(int socketfd, struct sockaddr_in addr)
+{
+  // Create count to keep track of the amount of IPS that have been logged
+  for (int i = 0; i < 4; i++)
+    {
+      memset(ip_records[i].chaddr, 0, sizeof(ip_records[i].chaddr));
+      ip_records[i].yiaddr_count = 0;
+      ip_records[i].dhcp_type = 0;
+      ip_records[i].is_tombstone = 0;
+    }
+
+  while (1)
+  {
+    // Set up the length of the request that the server receives
+    size_t length = sizeof(msg_t) + sizeof(options_t);
+    uint8_t *recv_buffer = calloc(1, length);
+    socklen_t addrlen = sizeof(addr);
+    ssize_t nbytes = recvfrom(socketfd, recv_buffer, length, 0, (struct sockaddr *)&addr, &addrlen);
+
+    if (nbytes < 0)
+    {
+      free(recv_buffer);
+      return 0;
+    }
+
+    pthread_t t;
+    thread_args_t args = thread_args_init (socketfd, recv_buffer, nbytes, addr, addrlen);
+    pthread_create (t, NULL, child, (void *) &args);
+  }
+  close(socketfd);
+  return 1;
+}
 
 void echo_server(int time)
 {

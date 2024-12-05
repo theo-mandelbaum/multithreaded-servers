@@ -8,6 +8,7 @@
 
 
 void echo_server(int);
+void echo_server_thread(int);
 
 extern bool debug;
 extern struct in_addr THIS_SERVER;

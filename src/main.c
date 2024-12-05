@@ -25,7 +25,7 @@ main (int argc, char **argv)
   if (call_server)
     echo_server (timeout);
   if (call_server && thread_flag)
-    echo_server_thread ();
+    echo_server_thread (timeout);
   return EXIT_SUCCESS;
 }
 
@@ -33,7 +33,7 @@ static bool
 get_args (int argc, char **argv, int *timeout)
 {
   int ch = 0;
-  while ((ch = getopt (argc, argv, "dhts:")) != -1)
+  while ((ch = getopt (argc, argv, "dht:s:")) != -1)
     {
       switch (ch)
         {
@@ -46,6 +46,8 @@ get_args (int argc, char **argv, int *timeout)
           break;
         case 't':
           thread_flag = true;
+          call_server = true;
+          *timeout = strtol (optarg, NULL, 10);
           break;
         default:
           return false;
