@@ -7,6 +7,8 @@
 #include "dhcp.h"
 
 
+void echo_server(int);
+
 extern bool debug;
 extern struct in_addr THIS_SERVER;
 

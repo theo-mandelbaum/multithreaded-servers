@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <assert.h>
+#include <pthread.h>
 
 #include "dhcp.h"
 #include "format.h"
@@ -29,7 +30,16 @@ void handle_nak_message (int, msg_t *, struct sockaddr_in, socklen_t);
 int handle_valid_message (int, struct sockaddr_in, socklen_t, options_t, msg_t *, int *, ip_record_t *);
 int handle_dhcp_release (ip_record_t *, msg_t *, int *, uint8_t *, options_t);
 
-void echo_server()
+int yiaddr_count = 1;
+int count = 1;
+ip_record_t ip_records[4];
+
+void echo_server_thread()
+  {
+    
+  }
+
+void echo_server(int time)
 {
   int socketfd = socket(AF_INET, SOCK_DGRAM, 0);
 
@@ -41,7 +51,7 @@ void echo_server()
   setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&socket_option, sizeof(int));
 
   // Set timeout socket options
-  struct timeval timeout = {10, 0};
+  struct timeval timeout = {time, 0};
   setsockopt(socketfd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&timeout, sizeof(timeout));
 
   // bind the socket to the client
@@ -58,9 +68,7 @@ void echo_server()
 int socket_helper(int socketfd, struct sockaddr_in addr)
 {
   // Create count to keep track of the amount of IPS that have been logged
-  int yiaddr_count = 1; // Initialize yiaddr_count
-  int count = 1;
-  ip_record_t ip_records[4];
+  pthread_t threads[4];
   for (int i = 0; i < 4; i++)
     {
       memset(ip_records[i].chaddr, 0, sizeof(ip_records[i].chaddr));
@@ -77,6 +85,9 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
     socklen_t addrlen = sizeof(addr);
     ssize_t nbytes = recvfrom(socketfd, recv_buffer, length, 0, (struct sockaddr *)&addr, &addrlen);
 
+
+    // pthread_create ();
+
     if (nbytes < 0)
     {
       free(recv_buffer);
@@ -88,7 +99,7 @@ int socket_helper(int socketfd, struct sockaddr_in addr)
     if (count >= MAX_IPS && memcmp(ip_records[3].chaddr, recv_msg->chaddr, sizeof(ip_records[3].chaddr)) != 0)
     {
       // Reject request
-      // Construct the BOOTP response
+      // Construct the BOOTP responsex
       options_t options = create_options (recv_buffer, nbytes);
 
       uint8_t *fake_send_buffer = calloc (1, sizeof (uint8_t));
