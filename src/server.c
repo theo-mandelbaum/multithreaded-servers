@@ -438,13 +438,13 @@ thread_args_init (int socket, uint8_t *buffer, ssize_t bytes, struct sockaddr_in
 {
   thread_args_t args;
   args.sfd = socket;
-  args.recvbuffer = calloc (1, sizeof (buffer));
+  args.recvbuffer = calloc (1, bytes);
   args.nbytes = bytes;
   // memset (&args.addr, 0, sizeof (addr));
   args.addr = addr;
   args.addrlen = addrlen;
 
-  memcpy (args.recvbuffer, buffer, sizeof (buffer));
+  memcpy (args.recvbuffer, buffer, bytes);
   return args;
 }
 
