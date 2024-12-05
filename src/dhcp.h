@@ -123,4 +123,12 @@ typedef struct {
   int is_tombstone;
 } ip_record_t;
 
+typedef struct {
+  int sfd;
+  uint8_t *recvbuffer;
+  ssize_t nbytes;
+  struct sockaddr_in addr;
+  socklen_t addrlen;
+} thread_args_t;
+
 #endif
