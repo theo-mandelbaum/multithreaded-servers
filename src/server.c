@@ -453,9 +453,9 @@ void *
 child (void *args)
 {
   // Create our BOOTP data from the received request
-    sem_t sem;
-    sem_init (&sem, 0, 4);
-    sem_wait (&sem);
+    // sem_t sem; lol
+    // sem_init (&sem, 0, 4);
+    // sem_wait (&sem);
     // barrier that doesn't activate until 4 has been hit
     pthread_barrier_t barrier;
     pthread_barrier_init (&barrier, NULL, 4);
