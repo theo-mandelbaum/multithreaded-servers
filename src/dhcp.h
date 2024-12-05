@@ -126,10 +126,12 @@ typedef struct {
 
 typedef struct {
   int sfd;
-  uint8_t *recvbuffer;
+  uint8_t *recvbuffer[4];
   ssize_t nbytes;
   struct sockaddr_in addr;
   socklen_t addrlen;
+  bool release_flag;
+  int recvbuffer_size;
 } thread_args_t;
 
 #endif

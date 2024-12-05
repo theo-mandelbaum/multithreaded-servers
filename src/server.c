@@ -31,12 +31,14 @@ options_t create_options (uint8_t *, ssize_t);
 void handle_nak_message (int, msg_t *, struct sockaddr_in, socklen_t);
 int handle_valid_message (int, struct sockaddr_in, socklen_t, options_t, msg_t *, int *, ip_record_t *);
 int handle_dhcp_release (ip_record_t *, msg_t *, int *, uint8_t *, options_t);
-thread_args_t thread_args_init (int, uint8_t *, ssize_t, struct sockaddr_in, socklen_t);
+thread_args_t thread_args_init (int, uint8_t **, ssize_t, struct sockaddr_in, socklen_t, bool, int);
 void *child (void *);
 
 int yiaddr_count = 1;
 int count = 1;
 ip_record_t ip_records[4];
+uint8_t last_type;
+uint8_t last_last_type;
 
 void echo_server_thread(int time)
 {
@@ -74,131 +76,313 @@ int socket_helper_thread(int socketfd, struct sockaddr_in addr)
       ip_records[i].dhcp_type = 0;
       ip_records[i].is_tombstone = 0;
     }
+  
+  // int request_counter = 0;
+  uint8_t *recv_buffer_array[4];
 
-  while (1)
-  {
-    // Set up the length of the request that the server receives
-    size_t length = sizeof(msg_t) + sizeof(options_t);
-    uint8_t *recv_buffer = calloc(1, length);
-    socklen_t addrlen = sizeof(addr);
-    ssize_t nbytes = recvfrom(socketfd, recv_buffer, length, 0, (struct sockaddr *)&addr, &addrlen);
-
-    if (nbytes < 0)
-    {
-      free(recv_buffer);
-      return 0;
-    }
-
-    pthread_t t;
-    thread_args_t args = thread_args_init (socketfd, recv_buffer, nbytes, addr, addrlen);
-    pthread_create (t, NULL, child, (void *) &args);
-  }
-  close(socketfd);
-  return 1;
-}
-
-void echo_server(int time)
-{
-  int socketfd = socket(AF_INET, SOCK_DGRAM, 0);
-
-  // Create my address struct using a helper
-  struct sockaddr_in addr = address_gen();
-
-  // Set reusable socket options
-  int socket_option = 1;
-  setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&socket_option, sizeof(int));
-
-  // Set timeout socket options
-  struct timeval timeout = {time, 0};
-  setsockopt(socketfd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&timeout, sizeof(timeout));
-
-  // bind the socket to the client
-  if (bind(socketfd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-  {
-    perror("Bind failed");
-    close(socketfd);
-    exit(EXIT_FAILURE);
-  }
-
-  socket_helper(socketfd, addr);
-}
-
-int socket_helper(int socketfd, struct sockaddr_in addr)
-{
-  // Create count to keep track of the amount of IPS that have been logged
-  pthread_t threads[4];
+  // First loop to get the queue for the 4 DISCOVERs
   for (int i = 0; i < 4; i++)
     {
-      memset(ip_records[i].chaddr, 0, sizeof(ip_records[i].chaddr));
-      ip_records[i].yiaddr_count = 0;
-      ip_records[i].dhcp_type = 0;
-      ip_records[i].is_tombstone = 0;
-    }
+      // Set up the length of the request that the server receives
+      size_t length = sizeof(msg_t) + sizeof(options_t);
+      uint8_t *recv_buffer = calloc(1, length);
+      socklen_t addrlen = sizeof(addr);
+      ssize_t nbytes = recvfrom(socketfd, recv_buffer, length, 0, (struct sockaddr *)&addr, &addrlen);
 
-  while (1)
-  {
-    // Set up the length of the request that the server receives
-    size_t length = sizeof(msg_t) + sizeof(options_t);
-    uint8_t *recv_buffer = calloc(1, length);
-    socklen_t addrlen = sizeof(addr);
-    ssize_t nbytes = recvfrom(socketfd, recv_buffer, length, 0, (struct sockaddr *)&addr, &addrlen);
+      if (nbytes < 0)
+      {
+        free(recv_buffer);
+        return 0;
+      }
 
-
-    // pthread_create ();
-
-    if (nbytes < 0)
-    {
-      free(recv_buffer);
-      return 0;
-    }
-    // Create our BOOTP data from the received request
-    msg_t *recv_msg = (msg_t *)recv_buffer;
-
-    if (count >= MAX_IPS && memcmp(ip_records[3].chaddr, recv_msg->chaddr, sizeof(ip_records[3].chaddr)) != 0)
-    {
-      // Reject request
-      // Construct the BOOTP responsex
-      options_t options = create_options (recv_buffer, nbytes);
-
-      uint8_t *fake_send_buffer = calloc (1, sizeof (uint8_t));
-      if (handle_dhcp_release (ip_records, recv_msg, &count, fake_send_buffer, options) == 0)
-        continue;
-
-      bad_server_reply_gen(recv_msg, count);
-
-      handle_nak_message (socketfd, recv_msg, addr, addrlen);
-    }
-    else
-    {
-      // Accept and handle request
-
-      // Create an options struct, zero it out
-      options_t options = create_options (recv_buffer, nbytes);
-
-      bool check_tombstones = true;
-      // Keeps track of the yiaddr count just for the server's reply
-      int yiaddr_for_reply = 0;
-      handle_client_assignment (ip_records, recv_msg, &yiaddr_count, &yiaddr_for_reply, &count, &check_tombstones);
       
-      // Handle tombstone cases
-      if (check_tombstones)
-        {
-          handle_tombstone (ip_records, recv_msg, &yiaddr_for_reply);
-        }
-
-      // Construct the BOOTP response
-      server_reply_gen(recv_msg, options, yiaddr_for_reply);
-
-      if (handle_valid_message (socketfd, addr, addrlen, options, recv_msg, &count, ip_records) == 0)
-        continue;
-
-      free_options(&options);
     }
-    free(recv_buffer);
-  }
+
+  options_t options = create_options (recv_buffer, nbytes);
+  if (*options.type == DHCPRELEASE)
+    {
+      recv_buffer_array[0] = recv_buffer;
+      pthread_t t;
+      thread_args_t *args = calloc (1, sizeof (thread_args_t));
+      *args = thread_args_init (socketfd, recv_buffer_array, nbytes, addr, addrlen, true, 1);
+      pthread_create (t, NULL, child, (void *)args);
+      pthread_detach(t);
+      last_type = DHCPRELEASE;
+      last_last_type = last_type;
+    }
+  else
+    {
+      pthread_t t[4];
+      if (request_counter < 3)
+        {
+          recv_buffer_array[request_counter] = recv_buffer;
+          request_counter++;
+          continue;
+        }
+      else
+        {
+          recv_buffer_array[request_counter] = recv_buffer;
+          request_counter++;
+        }
+      thread_args_t *args = calloc (1, sizeof (thread_args_t));
+      *args = thread_args_init (socketfd, recv_buffer_array, nbytes, addr, addrlen, false, 4);
+      for (int i = 0; i < 4; i++)
+        {
+          pthread_create (&t[i], NULL, child, (void *)args);
+          pthread_detach(t[i]);
+          free (recv_buffer_array[i]);
+        }
+      free (args);
+      request_counter = 0;
+    }
+  free_options (&options);
   close(socketfd);
   return 1;
 }
+
+// int socket_helper_thread(int socketfd, struct sockaddr_in addr)
+// {
+//     // Initialize IP records
+//     for (int i = 0; i < 4; i++)
+//     {
+//         memset(ip_records[i].chaddr, 0, sizeof(ip_records[i].chaddr));
+//         ip_records[i].yiaddr_count = 0;
+//         ip_records[i].dhcp_type = 0;
+//         ip_records[i].is_tombstone = 0;
+//     }
+
+//     uint8_t *recv_buffer_array[4];
+//     int request_counter = 0;
+
+//     // Handle the first 4 DHCPDISCOVER messages
+//     for (int i = 0; i < 4; i++)
+//     {
+//         size_t length = sizeof(msg_t) + sizeof(options_t);
+//         uint8_t *recv_buffer = calloc(1, length);
+//         socklen_t addrlen = sizeof(addr);
+//         ssize_t nbytes = recvfrom(socketfd, recv_buffer, length, 0, (struct sockaddr *)&addr, &addrlen);
+
+//         if (nbytes < 0)
+//         {
+//             free(recv_buffer);
+//             return 0;
+//         }
+
+//         options_t options = create_options(recv_buffer, nbytes);
+//         if (*options.type == DHCPDISCOVER)
+//         {
+//             recv_buffer_array[i] = recv_buffer;
+//         }
+//         free_options(&options);
+//     }
+
+//     // Process the 4 DHCPDISCOVER messages
+//     pthread_t t_discover[4];
+//     thread_args_t args = thread_args_init(socketfd, recv_buffer_array, sizeof(msg_t) + sizeof(options_t), addr, sizeof(addr), false, 4);
+//     for (int i = 0; i < 4; i++)
+//     {
+//         pthread_create(&t_discover[i], NULL, child, (void *)&args);
+//         pthread_detach(t_discover[i]);
+//         free(recv_buffer_array[i]);
+//     }
+
+//     // Handle the first 4 DHCPREQUEST messages
+//     for (int i = 0; i < 4; i++)
+//     {
+//         size_t length = sizeof(msg_t) + sizeof(options_t);
+//         uint8_t *recv_buffer = calloc(1, length);
+//         socklen_t addrlen = sizeof(addr);
+//         ssize_t nbytes = recvfrom(socketfd, recv_buffer, length, 0, (struct sockaddr *)&addr, &addrlen);
+
+//         if (nbytes < 0)
+//         {
+//             free(recv_buffer);
+//             return 0;
+//         }
+
+//         options_t options = create_options(recv_buffer, nbytes);
+//         if (*options.type == DHCPREQUEST)
+//         {
+//             recv_buffer_array[i] = recv_buffer;
+//         }
+//         free_options(&options);
+//     }
+
+//     // Process the 4 DHCPREQUEST messages
+//     args = thread_args_init(socketfd, recv_buffer_array, sizeof(msg_t) + sizeof(options_t), addr, sizeof(addr), false, 4);
+//     for (int i = 0; i < 4; i++)
+//     {
+//         pthread_create(&t_discover[i], NULL, child, (void *)&args);
+//         pthread_detach(t_discover[i]);
+//         free(recv_buffer_array[i]);
+//     }
+
+//     // Handle DHCPRELEASE followed by the last DHCPDISCOVER and DHCPREQUEST
+//     size_t length = sizeof(msg_t) + sizeof(options_t);
+//     uint8_t *recv_buffer = calloc(1, length);
+//     socklen_t addrlen = sizeof(addr);
+//     ssize_t nbytes = recvfrom(socketfd, recv_buffer, length, 0, (struct sockaddr *)&addr, &addrlen);
+
+//     if (nbytes < 0)
+//     {
+//         free(recv_buffer);
+//         return 0;
+//     }
+
+//     options_t options = create_options(recv_buffer, nbytes);
+//     if (*options.type == DHCPRELEASE)
+//     {
+//         pthread_t t;
+//         recv_buffer_array[0] = recv_buffer;
+
+//         thread_args_t args = thread_args_init(socketfd, recv_buffer_array, nbytes, addr, addrlen, true, 1);
+
+//         pthread_create(&t, NULL, child, (void *)&args);
+//         pthread_detach(t);
+
+//         last_type = DHCPRELEASE;
+//     }
+
+//     // Handle the final DHCPDISCOVER followed by DHCPREQUEST
+//     for (int i = 0; i < 2; i++) // One for the last DISCOVER, one for the last REQUEST
+//     {
+//         size_t length = sizeof(msg_t) + sizeof(options_t);
+//         uint8_t *recv_buffer = calloc(1, length);
+//         socklen_t addrlen = sizeof(addr);
+//         ssize_t nbytes = recvfrom(socketfd, recv_buffer, length, 0, (struct sockaddr *)&addr, &addrlen);
+
+//         if (nbytes < 0)
+//         {
+//             free(recv_buffer);
+//             return 0;
+//         }
+
+//         options_t options = create_options(recv_buffer, nbytes);
+//         if (*options.type == DHCPDISCOVER || *options.type == DHCPREQUEST)
+//         {
+//             recv_buffer_array[i] = recv_buffer;
+//         }
+//         free_options(&options);
+//     }
+
+//     // Process the final DHCPDISCOVER and DHCPREQUEST
+//     args = thread_args_init(socketfd, recv_buffer_array, sizeof(msg_t) + sizeof(options_t), addr, sizeof(addr), false, 2);
+//     pthread_t t_replace[2];
+//     for (int i = 0; i < 2; i++)
+//     {
+//         pthread_create(&t_replace[i], NULL, child, (void *)&args);
+//         pthread_detach(t_replace[i]);
+//         free(recv_buffer_array[i]);
+//     }
+
+//     close(socketfd);
+//     return 1;
+// }
+
+
+
+// void echo_server(int time)
+// {
+//   int socketfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+//   // Create my address struct using a helper
+//   struct sockaddr_in addr = address_gen();
+
+//   // Set reusable socket options
+//   int socket_option = 1;
+//   setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&socket_option, sizeof(int));
+
+//   // Set timeout socket options
+//   struct timeval timeout = {time, 0};
+//   setsockopt(socketfd, SOL_SOCKET, SO_RCVTIMEO, (const void *)&timeout, sizeof(timeout));
+
+//   // bind the socket to the client
+//   if (bind(socketfd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+//   {
+//     perror("Bind failed");
+//     close(socketfd);
+//     exit(EXIT_FAILURE);
+//   }
+
+//   socket_helper(socketfd, addr);
+// }
+
+// int socket_helper(int socketfd, struct sockaddr_in addr)
+// {
+//   // Create count to keep track of the amount of IPS that have been logged
+//   pthread_t threads[4];
+//   for (int i = 0; i < 4; i++)
+//     {
+//       memset(ip_records[i].chaddr, 0, sizeof(ip_records[i].chaddr));
+//       ip_records[i].yiaddr_count = 0;
+//       ip_records[i].dhcp_type = 0;
+//       ip_records[i].is_tombstone = 0;
+//     }
+
+//   while (1)
+//   {
+//     // Set up the length of the request that the server receives
+//     size_t length = sizeof(msg_t) + sizeof(options_t);
+//     uint8_t *recv_buffer = calloc(1, length);
+//     socklen_t addrlen = sizeof(addr);
+//     ssize_t nbytes = recvfrom(socketfd, recv_buffer, length, 0, (struct sockaddr *)&addr, &addrlen);
+
+
+//     // pthread_create ();
+
+//     if (nbytes < 0)
+//     {
+//       free(recv_buffer);
+//       return 0;
+//     }
+//     // Create our BOOTP data from the received request
+//     msg_t *recv_msg = (msg_t *)recv_buffer;
+
+//     if (count >= MAX_IPS && memcmp(ip_records[3].chaddr, recv_msg->chaddr, sizeof(ip_records[3].chaddr)) != 0)
+//     {
+//       // Reject request
+//       // Construct the BOOTP responsex
+//       options_t options = create_options (recv_buffer, nbytes);
+
+//       uint8_t *fake_send_buffer = calloc (1, sizeof (uint8_t));
+//       if (handle_dhcp_release (ip_records, recv_msg, &count, fake_send_buffer, options) == 0)
+//         continue;
+
+//       bad_server_reply_gen(recv_msg, count);
+
+//       handle_nak_message (socketfd, recv_msg, addr, addrlen);
+//     }
+//     else
+//     {
+//       // Accept and handle request
+
+//       // Create an options struct, zero it out
+//       options_t options = create_options (recv_buffer, nbytes);
+
+//       bool check_tombstones = true;
+//       // Keeps track of the yiaddr count just for the server's reply
+//       int yiaddr_for_reply = 0;
+//       handle_client_assignment (ip_records, recv_msg, &yiaddr_count, &yiaddr_for_reply, &count, &check_tombstones);
+      
+//       // Handle tombstone cases
+//       if (check_tombstones)
+//         {
+//           handle_tombstone (ip_records, recv_msg, &yiaddr_for_reply);
+//         }
+
+//       // Construct the BOOTP response
+//       server_reply_gen(recv_msg, options, yiaddr_for_reply);
+
+//       if (handle_valid_message (socketfd, addr, addrlen, options, recv_msg, &count, ip_records) == 0)
+//         continue;
+
+//       free_options(&options);
+//     }
+//     free(recv_buffer);
+//   }
+//   close(socketfd);
+//   return 1;
+// }
 
 int handle_dhcp_release (ip_record_t *ip_records, msg_t *recv_msg, int *count, uint8_t *send_buffer, options_t options)
   {
@@ -435,17 +619,21 @@ int address_len_helper(int htype)
 }
 
 thread_args_t
-thread_args_init (int socket, uint8_t *buffer, ssize_t bytes, struct sockaddr_in addr, socklen_t addrlen)
+thread_args_init (int socket, uint8_t **buffer_array, ssize_t bytes, struct sockaddr_in addr, socklen_t addrlen, bool release_flag, int iterations)
 {
   thread_args_t args;
   args.sfd = socket;
-  args.recvbuffer = calloc (1, bytes);
+  args.recvbuffer_size = 0;
+  for (int i = 0; i < iterations; i++)
+    {
+      args.recvbuffer_size++;
+      args.recvbuffer[i] = calloc (1, bytes);
+      memcpy (args.recvbuffer[i], buffer_array[i], bytes);
+    }
   args.nbytes = bytes;
-  // memset (&args.addr, 0, sizeof (addr));
   args.addr = addr;
   args.addrlen = addrlen;
-
-  memcpy (args.recvbuffer, buffer, bytes);
+  args.release_flag = release_flag;
   return args;
 }
 
@@ -453,63 +641,57 @@ void *
 child (void *args)
 {
   // Create our BOOTP data from the received request
-    // sem_t sem; lol
-    // sem_init (&sem, 0, 4);
     // sem_wait (&sem);
     // barrier that doesn't activate until 4 has been hit
-    pthread_barrier_t barrier;
-    pthread_barrier_init (&barrier, NULL, 4);
-    pthread_barrier_wait (&barrier);
     thread_args_t *thread_stuff = (thread_args_t *) args;
-    msg_t *recv_msg = (msg_t *)thread_stuff->recvbuffer;
+    for (int i = 0; i < thread_stuff->recvbuffer_size; i++)
+      {
+        msg_t *recv_msg = (msg_t *)thread_stuff->recvbuffer[i];
 
-    if (count >= MAX_IPS && memcmp(ip_records[3].chaddr, recv_msg->chaddr, sizeof(ip_records[3].chaddr)) != 0)
-    {
-      // Reject request
-      // Construct the BOOTP response
-      options_t options = create_options (thread_stuff->recvbuffer, thread_stuff->nbytes);
-
-      uint8_t *fake_send_buffer = calloc (1, sizeof (uint8_t));
-      if (handle_dhcp_release (ip_records, recv_msg, &count, fake_send_buffer, options) == 0)
-        
-        pthread_exit (NULL);
-
-      bad_server_reply_gen(recv_msg, count);
-
-      handle_nak_message (thread_stuff->sfd, recv_msg, thread_stuff->addr, thread_stuff->addrlen);
-
-      sem_post (&sem);
-    }
-    else
-    {
-      // Accept and handle request
-
-      // Create an options struct, zero it out
-      options_t options = create_options (thread_stuff->recvbuffer, thread_stuff->nbytes);
-
-      bool check_tombstones = true;
-      // Keeps track of the yiaddr count just for the server's reply
-      int yiaddr_for_reply = 0;
-      handle_client_assignment (ip_records, recv_msg, &yiaddr_count, &yiaddr_for_reply, &count, &check_tombstones);
-      
-      // Handle tombstone cases
-      if (check_tombstones)
+        if (count >= MAX_IPS && memcmp(ip_records[3].chaddr, recv_msg->chaddr, sizeof(ip_records[3].chaddr)) != 0)
         {
-          handle_tombstone (ip_records, recv_msg, &yiaddr_for_reply);
+          // Reject request
+          // Construct the BOOTP response
+          options_t options = create_options (thread_stuff->recvbuffer[i], thread_stuff->nbytes);
+
+          uint8_t *fake_send_buffer = calloc (1, sizeof (uint8_t));
+          if (handle_dhcp_release (ip_records, recv_msg, &count, fake_send_buffer, options) == 0)
+            pthread_exit (NULL);
+
+          bad_server_reply_gen(recv_msg, count);
+
+          handle_nak_message (thread_stuff->sfd, recv_msg, thread_stuff->addr, thread_stuff->addrlen);
+
+          // sem_post (&sem);
         }
+        else
+        {
+          // Accept and handle request
 
-      // Construct the BOOTP response
-      server_reply_gen(recv_msg, options, yiaddr_for_reply);
+          // Create an options struct, zero it out
+          options_t options = create_options (thread_stuff->recvbuffer[i], thread_stuff->nbytes);
 
-      if (handle_valid_message (thread_stuff->sfd, thread_stuff->addr, thread_stuff->addrlen, options, recv_msg, &count, ip_records) == 0)
-        sem_post(&sem);
-        pthread_exit (NULL);
+          bool check_tombstones = true;
+          // Keeps track of the yiaddr count just for the server's reply
+          int yiaddr_for_reply = 0;
+          handle_client_assignment (ip_records, recv_msg, &yiaddr_count, &yiaddr_for_reply, &count, &check_tombstones);
+          
+          // Handle tombstone cases
+          if (check_tombstones)
+            {
+              handle_tombstone (ip_records, recv_msg, &yiaddr_for_reply);
+            }
 
-      free_options(&options);
-      sem_post (&sem);
-    }
-    free(thread_stuff->recvbuffer);
-    pthread_barrier_destroy (&barrier);
+          // Construct the BOOTP response
+          server_reply_gen(recv_msg, options, yiaddr_for_reply);
+
+          if (handle_valid_message (thread_stuff->sfd, thread_stuff->addr, thread_stuff->addrlen, options, recv_msg, &count, ip_records) == 0)
+            pthread_exit (NULL);
+
+          free_options(&options);
+          // sem_post (&sem);
+        }
+      }
     pthread_exit (NULL);
 }
 
