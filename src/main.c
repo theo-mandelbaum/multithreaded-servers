@@ -12,6 +12,7 @@ static bool get_args (int, char **);
 
 bool debug = false;
 bool call_server = false;
+bool thread = false;
 
 int
 main (int argc, char **argv)
@@ -31,7 +32,7 @@ static bool
 get_args (int argc, char **argv)
 {
   int ch = 0;
-  while ((ch = getopt (argc, argv, "dhs:")) != -1)
+  while ((ch = getopt (argc, argv, "dhst:")) != -1)
     {
       switch (ch)
         {
@@ -40,6 +41,9 @@ get_args (int argc, char **argv)
           break;
         case 's':
           call_server = true;
+          break;
+        case 't':
+          thread = true;
           break;
         default:
           return false;
