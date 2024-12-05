@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <assert.h>
 #include <pthread.h>
+#include "semaphore.h"
 
 #include "dhcp.h"
 #include "format.h"
@@ -438,13 +439,13 @@ thread_args_init (int socket, uint8_t *buffer, ssize_t bytes, struct sockaddr_in
 {
   thread_args_t args;
   args.sfd = socket;
-  args.recvbuffer = calloc (1, sizeof (buffer));
+  args.recvbuffer = calloc (1, bytes);
   args.nbytes = bytes;
   // memset (&args.addr, 0, sizeof (addr));
   args.addr = addr;
   args.addrlen = addrlen;
 
-  memcpy (args.recvbuffer, buffer, sizeof (buffer));
+  memcpy (args.recvbuffer, buffer, bytes);
   return args;
 }
 
@@ -452,10 +453,13 @@ void *
 child (void *args)
 {
   // Create our BOOTP data from the received request
-    // sem_t sem;
-    // sem_init (&sem, 0, 4);
-    // sem_wait (&sem);
+    sem_t sem;
+    sem_init (&sem, 0, 4);
+    sem_wait (&sem);
     // barrier that doesn't activate until 4 has been hit
+    pthread_barrier_t barrier;
+    pthread_barrier_init (&barrier, NULL, 4);
+    pthread_barrier_wait (&barrier);
     thread_args_t *thread_stuff = (thread_args_t *) args;
     msg_t *recv_msg = (msg_t *)thread_stuff->recvbuffer;
 
@@ -473,6 +477,8 @@ child (void *args)
       bad_server_reply_gen(recv_msg, count);
 
       handle_nak_message (thread_stuff->sfd, recv_msg, thread_stuff->addr, thread_stuff->addrlen);
+
+      sem_post (&sem);
     }
     else
     {
@@ -496,11 +502,14 @@ child (void *args)
       server_reply_gen(recv_msg, options, yiaddr_for_reply);
 
       if (handle_valid_message (thread_stuff->sfd, thread_stuff->addr, thread_stuff->addrlen, options, recv_msg, &count, ip_records) == 0)
+        sem_post(&sem);
         pthread_exit (NULL);
 
       free_options(&options);
+      sem_post (&sem);
     }
     free(thread_stuff->recvbuffer);
+    pthread_barrier_destroy (&barrier);
     pthread_exit (NULL);
 }
 

@@ -22,7 +22,7 @@ main (int argc, char **argv)
   if (debug)
     fprintf (stderr, "Shutting down\n");
 
-  if (call_server)
+  if (call_server && !thread_flag)
     echo_server (timeout);
   if (call_server && thread_flag)
     echo_server_thread (timeout);
