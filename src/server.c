@@ -107,18 +107,49 @@ socket_helper_thread (int socketfd, struct sockaddr_in addr)
       nbytes_array[i] = nbytes;
     }
 
-  thread_args_t *args = calloc (1, sizeof (thread_args_t));
-  *args = thread_args_init (socketfd, recv_buffer_array, nbytes_array, addr,
+  thread_args_t *args1 = calloc (1, sizeof (thread_args_t));
+  *args1 = thread_args_init (socketfd, recv_buffer_array, nbytes_array, addr,
                             addrlen, false, 4);
-  pthread_t t;
-  assert (pthread_create (&t, NULL, child, (void *)args) == 0);
+  pthread_t t1;
+  assert (pthread_create (&t1, NULL, child, (void *)args1) == 0);
 
+  pthread_join (t1, NULL);
   for (int i = 0; i < 4; i++)
     {
       free (recv_buffer_array[i]);
     }
+  free (args1);
 
   printf ("Should have finished sending offers\n");
+
+  for (int i = 0; i < 4; i++)
+  {
+    ssize_t nbytes = recvfrom (socketfd, recv_buffer_array[i], length, 0,
+                                (struct sockaddr *)&addr, &addrlen);
+
+    if (nbytes < 0)
+      {
+        free (recv_buffer_array[i]);
+        return 0;
+      }
+
+    nbytes_array[i] = nbytes;
+  }
+
+  thread_args_t *args2 = calloc (1, sizeof (thread_args_t));
+  *args2 = thread_args_init (socketfd, recv_buffer_array, nbytes_array, addr,
+                            addrlen, false, 4);
+  pthread_t t2;
+  assert (pthread_create (&t2, NULL, child, (void *)args2) == 0);
+
+  pthread_join (t2, NULL);
+  for (int i = 0; i < 4; i++)
+    {
+      free (recv_buffer_array[i]);
+    }
+  free (args2);
+
+  
 
   // options_t options = create_options (recv_buffer, nbytes);
   // if (*options.type == DHCPRELEASE)
