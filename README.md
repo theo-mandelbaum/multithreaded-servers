@@ -1,4 +1,4 @@
-This repository is a copy of my final project in my Computer Systems II course at James Madison University. The project specifications can be found here[[https://w3.cs.jmu.edu/kirkpams/361/projects/p3-dhcp.shtml]]
+This repository is a copy of my final project in my Computer Systems II course at James Madison University. The project specifications can be found [here](https://w3.cs.jmu.edu/kirkpams/361/projects/p3-dhcp.shtml)
 
 
 # Background:
