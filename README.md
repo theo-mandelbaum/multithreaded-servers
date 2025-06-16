@@ -5,21 +5,21 @@ This repository is a copy of my final project in my Computer Systems II course a
 As we began the second half of our semester in Computer Systems II, we shifted our focus to networked concurrency and connectivity. So, this included topics such as IP addressing, the internet model, transport-layer protocols, application layer broadcasting, and wireless connectivity. Accordingly, our second project in this course was to implement a simulation of the client side of a DHCP protocol, establishing network settings for a client. To accomplish this, we used BOOTP packet interpretation and UDP requests/responses. The project shown below build upon the client side DHCP implementation.
 
 # Project Overview
-For the third and final project in Computer Systems II, we were tasked with implementing the DHCP server, since we had already made the client. While this used many of the same topics and skills as the client (sending and receiving UDP messages, deciphering between DHCP signals), multihtreading was our last topic of study. Consequently, the DHCP server that we were implementing was a multithreaded server.
-
+For the third and final project in Computer Systems II, we were tasked with implementing the DHCP server, since we had already made the client. While this used many of the same topics and skills as the client (sending and receiving UDP messages, deciphering between DHCP signals), multihtreading was our last topic of the semester. Consequently, the DHCP server that we were implementing was a multithreaded server.
 ## Relevancy
-The reason why this project is relevant to me now, seven months after completion, is because I have recently started exploring distributed systems, and this project was my first real experience with concurrency in systems.
+The reason why this project is relevant to me now, seven months after completion, is because I have recently started exploring distributed systems. This project was my first real experience with concurrency in systems, although it was beginner multithreading.
 
-# Features & Technologies
-
+# Technologies
+## Languages
+This project is entirely coded in C
 
 # Features Implemented
+- The first feature implemented in this project was server side response to DHCP Discover and DHCP Request. This involved 
+
+# How the project works
 
 
-# How the app works
-
-
-# My Contributions & What I Learned
+# What I Learned
 
 
 # Testing and Evaluation
