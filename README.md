@@ -10,11 +10,11 @@ For the third and final project in Computer Systems II, we were tasked with impl
 The reason why this project is relevant to me now, seven months after completion, is because I have recently started exploring distributed systems. This project was my first real experience with concurrency in systems, although it was beginner multithreading.
 
 # Technologies
-## Languages
+## Language(s)
 This project is entirely coded in C
 
 # Features Implemented
-- The first feature implemented in this project was server side response to DHCP Discover and DHCP Request. This involved 
+- The first feature implemented in this project was server side response to DHCP Discover and DHCP Request. This involved creating a [server socket](https://github.com/theo-mandelbaum/multithreaded-servers/blob/d4a875da09ccdc204c7a21f5c4c7ccfdcde78358/src/server.c#L47), bind the socket to my client, [receive the message](https://github.com/theo-mandelbaum/multithreaded-servers/blob/d4a875da09ccdc204c7a21f5c4c7ccfdcde78358/src/server.c#L98) constructing a response to DHCP Discover and Request messages and sending said responses back to the client.
 
 # How the project works
 
